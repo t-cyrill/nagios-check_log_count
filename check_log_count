@@ -1,0 +1,58 @@
+#!/usr/bin/env ruby
+
+require 'digest/md5'
+require 'optparse'
+require 'time'
+require 'shellwords'
+
+warning_th = 3
+critical_th = 5
+logfile = nil
+tmpfile = nil
+LIMIT = 10000
+# ignore patterns
+patterns = [
+  %r(INFO ),
+]
+
+opt = OptionParser.new
+opt.on('-w VAL') {|v| warning_th = v.to_i }
+opt.on('-c VAL') {|v| critical_th = v.to_i }
+opt.on('-t VAL') {|v| tmpfile = v }
+opt.on('-l VAL') {|v| logfile = v }
+opt.parse!(ARGV)
+
+if logfile.nil?
+  puts "No logfile set"
+  exit 3
+end
+
+tmpfile = "/tmp/check_log_count_#{Digest::MD5.hexdigest(logfile)}" if tmpfile.nil?
+errors = `tail #{Shellwords.escape(logfile)} | tail -n #{LIMIT}`.split /\n/
+errors = errors.reject do |e|
+  flag = false
+  patterns.each do |regexp|
+    flag = true if e =~ regexp
+  end
+  flag
+end
+
+prev_count = File.read(tmpfile) rescue nil
+File.write(tmpfile, errors.count)
+
+if prev_count.nil?
+    puts "OK - no data"
+    exit 0
+end
+error_count = errors.count - prev_count.to_i
+case
+  when error_count > critical_th
+    puts "CRITICAL - Too many errors detected. #{error_count}"
+    exit 2
+  when error_count > warning_th
+    puts "WARNING - Many errors detected. #{error_count}"
+    exit 1
+  else
+    puts "OK - #{error_count}"
+    exit 0
+end
